@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DEVALLEY_OS — Mediterranean Node</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+  <style>
+    /* ===== Reset TUI: sem cantos arredondados, sem blur, bordas sólidas de 1px ===== */
+    *, *::before, *::after {
+      border-radius: 0 !important;
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    :root {
+      --bg: #0d1117;
+      --border: #3b4252;
+      --fg: #cdd6f4;
+      --dim: #7f849c;
+      --green: #a6e3a1;
+      --cyan: #89dceb;
+      --yellow: #f9e2af;
+      --red: #f38ba8;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    #canvas-container {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+    }
+    #canvas-container canvas { display: block; }
+
+    /* ===== Statusbar estilo tmux/neovim (fixa no rodapé, 26px) ===== */
+    #statusbar {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      height: 26px;
+      display: flex;
+      align-items: stretch;
+      background: var(--bg);
+      border-top: 1px solid var(--border);
+      z-index: 50;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .sb-seg {
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      border-right: 1px solid var(--border);
+      color: var(--fg);
+    }
+    .sb-brand {
+      background: var(--green);
+      color: #000;
+      font-weight: 700;
+      border-right: none;
+    }
+    .sb-path { color: var(--cyan); }
+    .sb-spacer { flex: 1; border-right: none; }
+    .sb-key { color: var(--yellow); border-right: none; border-left: 1px solid var(--border); }
+    #status-dot-ok { color: var(--green); }
+    #status-dot-ok.down { color: var(--red); }
+    #status-dot-ok.wait { color: var(--yellow); }
+
+    /* ===== Janela de terminal (canto inferior esquerdo) ===== */
+    #terminal {
+      position: fixed;
+      left: 12px;
+      bottom: 38px; /* acima da statusbar */
+      width: 420px;
+      max-width: calc(100vw - 24px);
+      background: rgba(13, 17, 23, 0.95);
+      border: 1px solid var(--border);
+      z-index: 40;
+      display: flex;
+      flex-direction: column;
+    }
+    #terminal.focused { border-color: var(--green); }
+
+    .term-header {
+      display: flex;
+      align-items: center;
+      color: var(--dim);
+      white-space: nowrap;
+      overflow: hidden;
+      user-select: none;
+      line-height: 1.3;
+      padding: 0 2px;
+    }
+    #terminal.focused .term-header { color: var(--green); }
+    .term-header .fill { flex: 1; overflow: hidden; }
+    .term-header .fill::after { content: '────────────────────────────────────────────────────────────────'; }
+    .term-header button {
+      background: none;
+      border: none;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+      padding: 0 2px;
+    }
+    .term-header button:hover { color: var(--yellow); }
+
+    #term-body { display: flex; flex-direction: column; }
+    #terminal.min #term-body { display: none; }
+
+    #term-log {
+      height: 190px;
+      overflow-y: auto;
+      padding: 4px 10px;
+      border-top: 1px solid var(--border);
+      word-break: break-word;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) var(--bg);
+    }
+    #term-log::-webkit-scrollbar { width: 6px; }
+    #term-log::-webkit-scrollbar-track { background: var(--bg); }
+    #term-log::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .ln .tag { font-weight: 700; }
+    .ln.sys .tag { color: var(--yellow); }
+    .ln.net .tag { color: var(--cyan); }
+    .ln.chat .tag { color: var(--green); }
+    .ln.file .tag, .ln.file .msg { color: var(--green); }
+    .ln.err .tag, .ln.err .msg { color: var(--red); }
+    .ln .nick { color: var(--cyan); }
+    .ln.me .nick { color: var(--green); }
+    .ln .file-link {
+      background: none;
+      border: 1px solid var(--green);
+      color: var(--green);
+      font: inherit;
+      cursor: pointer;
+      padding: 0 4px;
+      margin-left: 4px;
+    }
+    .ln .file-link:hover {
+      background: var(--green);
+      color: #000;
+      font-weight: 700;
+    }
+
+    /* ===== Tooltip Fixo de Proximidade (Estilo Terminal) ===== */
+    #tui-tooltip {
+      position: fixed;
+      bottom: 42px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(13, 17, 23, 0.96);
+      border: 1px solid var(--green);
+      color: var(--fg);
+      padding: 5px 14px;
+      z-index: 60;
+      display: none;
+      white-space: nowrap;
+      user-select: none;
+      pointer-events: none;
+      gap: 14px;
+    }
+    #tui-tooltip.visible { display: flex; align-items: center; }
+    #tui-tooltip .key { color: #000; background: var(--green); font-weight: 700; padding: 0 5px; margin-right: 6px; }
+    #tui-tooltip .key.alt { background: var(--yellow); }
+
+    /* ===== Banner de Drag & Drop ===== */
+    #drop-banner {
+      position: fixed;
+      inset: 16px;
+      border: 2px dashed var(--green);
+      background: rgba(13, 17, 23, 0.85);
+      color: var(--green);
+      font-size: 16px;
+      font-weight: 700;
+      z-index: 9000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+    #drop-banner.active { display: flex; }
+
+    /* ===== Modal TUI Preview de Arquivo (z-index: 9999) ===== */
+    #file-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(6, 9, 14, 0.78);
+      z-index: 9999;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    #file-modal.open { display: flex; }
+    .modal-box {
+      width: min(760px, 94vw);
+      max-height: 84vh;
+      background: #0d1117;
+      border: 1px solid var(--green);
+      display: flex;
+      flex-direction: column;
+      color: var(--fg);
+    }
+    .modal-ascii-top, .modal-ascii-bot {
+      color: var(--green);
+      padding: 4px 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      user-select: none;
+      font-weight: 700;
+      background: #0d1117;
+    }
+    .modal-ascii-top { border-bottom: 1px solid var(--border); }
+    .modal-ascii-bot { border-top: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+    .modal-meta {
+      padding: 4px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--dim);
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .modal-content {
+      padding: 12px;
+      overflow: auto;
+      max-height: 62vh;
+      background: #090d12;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) var(--bg);
+    }
+    .modal-content img {
+      display: block;
+      max-width: 100%;
+      max-height: 56vh;
+      margin: 0 auto;
+      border: 1px solid var(--border);
+    }
+    .modal-content pre {
+      font-family: 'JetBrains Mono', ui-monospace, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--fg);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .tui-btn {
+      background: #0d1117;
+      border: 1px solid var(--border);
+      color: var(--fg);
+      font: inherit;
+      font-weight: 700;
+      padding: 3px 10px;
+      cursor: pointer;
+    }
+    .tui-btn:hover {
+      background: var(--green);
+      border-color: var(--green);
+      color: #000;
+    }
+    .tui-btn.close:hover {
+      background: var(--red);
+      border-color: var(--red);
+      color: #000;
+    }
+
+    .term-select {
+      border-top: 1px solid var(--border);
+      padding: 4px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .sel-row { display: flex; flex-wrap: wrap; gap: 0 6px; align-items: center; }
+    .sel-label { color: var(--dim); margin-right: 4px; }
+    .opt {
+      background: none;
+      border: none;
+      color: var(--fg);
+      font: inherit;
+      cursor: pointer;
+      padding: 0 2px;
+    }
+    .opt:hover { color: var(--yellow); }
+    .opt.active { background: var(--green); color: #000; font-weight: 700; }
+
+    .term-input {
+      display: flex;
+      align-items: center;
+      border-top: 1px solid var(--border);
+      padding: 4px 10px;
+    }
+    .term-input .prompt { color: var(--green); white-space: pre; user-select: none; }
+    #term-input {
+      flex: 1;
+      min-width: 0;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--fg);
+      font: inherit;
+      caret-color: var(--green);
+    }
+    #term-input::placeholder { color: #45475a; }
+  </style>
+
+  <!-- Importmap para Three.js e Addons via CDN unpkg -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <!-- Container do Three.js -->
+  <div id="canvas-container"></div>
+
+  <!-- Janela de terminal interativa -->
+  <div id="terminal">
+    <div class="term-header">
+      <span>┌── tty1: devalley-cli (zsh) </span>
+      <span class="fill"></span>
+      <button id="term-min" title="minimizar / restaurar">[ _ ]</button>
+      <span> ┐</span>
+    </div>
+    <div id="term-body">
+      <div id="term-log"></div>
+
+      <div class="term-select">
+        <div class="sel-row" id="mascot-row">
+          <span class="sel-label">mascot_select:</span>
+          <button class="opt" data-species="penguin">[01:tux]</button>
+          <button class="opt" data-species="duck">[02:duck]</button>
+          <button class="opt" data-species="python">[03:python]</button>
+          <button class="opt" data-species="octocat">[04:octocat]</button>
+        </div>
+        <div class="sel-row" id="color-row">
+          <span class="sel-label">headset_color:</span>
+        </div>
+      </div>
+
+      <div class="term-input">
+        <span class="prompt">devalley@node:~$ </span>
+        <input id="term-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="160" placeholder="/help">
+      </div>
+    </div>
+  </div>
+
+  <!-- Tooltip de Proximidade (Sentar / Totem) -->
+  <div id="tui-tooltip"></div>
+
+  <!-- Banner de Drag & Drop -->
+  <div id="drop-banner">[ DROP FILE TO SHARE ON CENTRAL TOTEM (MAX 2MB) ]</div>
+
+  <!-- Modal TUI Preview de Arquivo -->
+  <div id="file-modal" role="dialog" aria-modal="true">
+    <div class="modal-box">
+      <div class="modal-ascii-top" id="modal-title">╔════ preview ════════════════════════════════════════════════════╗</div>
+      <div class="modal-meta">
+        <span id="modal-info">file: --</span>
+        <span id="modal-owner">uploaded by: --</span>
+      </div>
+      <div class="modal-content" id="modal-content"></div>
+      <div class="modal-ascii-bot">
+        <span>╚═════════════════════════════════════════════════════════════════╝</span>
+        <div class="modal-actions">
+          <button class="tui-btn" id="modal-download">[ DOWNLOAD ]</button>
+          <button class="tui-btn close" id="modal-close">[ FECHAR (ESC) ]</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Statusbar fixa -->
+  <div id="statusbar">
+    <div class="sb-seg sb-brand">[ DEVALLEY_OS v1.0 ]</div>
+    <div class="sb-seg sb-path">~/mediterranean_node</div>
+    <div class="sb-seg"><span id="status-dot-ok" class="wait">●</span>&nbsp;<span id="status-devs">0</span>&nbsp;devs connected</div>
+    <div class="sb-seg" id="status-pos">POS: (0.0, 0.0, 0.0)</div>
+    <div class="sb-seg sb-spacer"></div>
+    <div class="sb-seg sb-key">[TAB] Focar Terminal</div>
+  </div>
+
+  <script type="module" src="./game.js"></script>
+</body>
+</html>
